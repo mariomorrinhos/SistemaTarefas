@@ -1,5 +1,10 @@
 <?php
 // index.php
+
+// 1. CONFIGURAÇÃO DO TEMPO DE VIDA DA SESSÃO (1 HORA = 3600 SEGUNDOS)
+ini_set('session.gc_maxlifetime', 3600); 
+session_set_cookie_params(3600);
+
 session_start();
 require_once 'config/database/conexao.php';
 
@@ -21,10 +26,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $user = $stmt->fetch();
 
     if ($user && password_verify($senha, $user['senha'])) {
+        
+        // --- PROTEÇÃO CONTRA SEQUESTRO DE SESSÃO / SESSÕES PRESAS ---
+        // Apaga o cookie antigo e gera um novo ID de sessão limpo no servidor
+        session_regenerate_id(true); 
+        
         // --- LOGIN SUCESSO ---
         $_SESSION['usuario_id'] = $user['id'];
         $_SESSION['usuario_nome'] = $user['nome'];
         $_SESSION['usuario_nivel'] = $user['nivel'];
+        // Marca a hora do login para controle manual se necessário em outras páginas
+        $_SESSION['ultimo_acesso'] = time(); 
         
         // 1. Mantém o histórico antigo (para lógica de negócio)
         $pdo->prepare("INSERT INTO historico_logins (usuario_id) VALUES (?)")->execute([$user['id']]);
