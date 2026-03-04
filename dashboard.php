@@ -148,8 +148,8 @@ if ($nivelUsuario <= 4) {
             margin-bottom: 3rem; 
         }
         
-        .kpi-card { background: white; border-radius: 20px; padding: 1.2rem; height: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.03); display: flex; align-items: center; justify-content: space-between; min-height: 100px; transition: transform 0.2s; position: relative; }
-        .kpi-card:hover { transform: translateY(-5px); }
+        .kpi-card { background: white; border-radius: 20px; padding: 1.2rem; height: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.03); display: flex; align-items: center; justify-content: space-between; min-height: 100px; transition: transform 0.2s; position: relative; text-decoration: none; color: inherit; }
+        .kpi-card:hover { transform: translateY(-5px); color: inherit; }
         .kpi-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; } 
         .kpi-info h3 { font-weight: 800; margin: 0; color: #1f2937; font-size: 1.5rem; transition: color 0.3s; }
         .kpi-info p { margin: 0; color: #6b7280; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
@@ -161,7 +161,7 @@ if ($nivelUsuario <= 4) {
         .kpi-orange { background: #fff7ed; color: #ea580c; }
         .kpi-cyan { background: #ecfeff; color: #06b6d4; }
         
-        .kpi-calendar-card { display: block !important; padding: 10px !important; }
+        .kpi-calendar-card { display: block !important; padding: 10px !important; cursor: default;}
         .mini-cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.75rem; font-weight: 800; color: #004d26; text-transform: uppercase; }
         .mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
         .mini-cal-day-head { font-size: 0.6rem; color: #94a3b8; font-weight: 700; margin-bottom: 2px; }
@@ -177,7 +177,7 @@ if ($nivelUsuario <= 4) {
         }
         .mini-cal-today.mini-cal-task::after { background-color: white; }
 
-        .kpi-clock-card { display: block !important; }
+        .kpi-clock-card { display: block !important; cursor: default; }
 
         .menu-btn { 
             background: white; border: 1px solid rgba(0,0,0,0.05); border-radius: 16px; padding: 1rem; 
@@ -264,14 +264,8 @@ if ($nivelUsuario <= 4) {
             transform: scale(1.1);
             color: white;
         }
-        .footer-whatsapp {
-            background-color: #25D366;
-            box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4);
-        }
-        .footer-instagram {
-            background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
-            box-shadow: 0 4px 15px rgba(220, 39, 67, 0.4);
-        }
+        .footer-whatsapp { background-color: #25D366; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4); }
+        .footer-instagram { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); box-shadow: 0 4px 15px rgba(220, 39, 67, 0.4); }
     </style>
 </head>
 <body>
@@ -316,7 +310,14 @@ if ($nivelUsuario <= 4) {
         </div>
 
         <div class="kpi-container">
-            <div class="kpi-card"><div class="kpi-info"><h3 id="val-abertas"><?= $stats['total_abertas'] ?></h3><p>Abertas</p></div><div class="kpi-icon kpi-blue"><i class="fa-regular fa-folder-open"></i></div></div>
+            <a href="minhas_tarefas.php" class="kpi-card" style="text-decoration: none;">
+                <div class="kpi-info">
+                    <h3 id="val-abertas"><?= $stats['total_abertas'] ?></h3>
+                    <p>Abertas</p>
+                </div>
+                <div class="kpi-icon kpi-blue"><i class="fa-regular fa-folder-open"></i></div>
+            </a>
+            
             <div class="kpi-card"><div class="kpi-info"><h3 id="val-pendentes-mes"><?= $stats['pendentes_mes'] ?></h3><p>Mês Atual</p></div><div class="kpi-icon kpi-cyan"><i class="fa-regular fa-calendar"></i></div></div>
             <div class="kpi-card"><div class="kpi-info"><h3 id="val-concluidas"><?= $stats['total_concluidas'] ?></h3><p>Feitas (Ano)</p></div><div class="kpi-icon kpi-green"><i class="fa-solid fa-check"></i></div></div>
             <div class="kpi-card"><div class="kpi-info"><h3 id="val-atrasadas"><?= $stats['total_atrasadas'] ?></h3><p>Atrasadas</p></div><div class="kpi-icon kpi-red"><i class="fa-solid fa-triangle-exclamation"></i></div></div>
@@ -475,7 +476,7 @@ if ($nivelUsuario <= 4) {
                 <div class="col-md-6 mb-3 mb-md-0">
                     <div class="footer-dev-label">Sistemas desenvolvidos e cedidos por</div>
                     <a href="https://www.mhos.com.br" target="_blank" class="footer-dev-name d-block">Mário Henrique Inácio de Paula</a>
-                    <div style="font-size: 0.75rem; color: #adb5bd; font-weight: normal; margin-top: 3px;">Versão 2.1</div>
+                    <div style="font-size: 0.75rem; color: #adb5bd; font-weight: normal; margin-top: 3px;">Versão 10.3</div>
                 </div>
 
                 <div class="col-md-6 text-center text-md-end mb-3 mb-md-0">
