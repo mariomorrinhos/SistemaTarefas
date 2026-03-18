@@ -33,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         $categoria_id = !empty($_POST['categoria_id']) ? intval($_POST['categoria_id']) : null;
         $num_prodata = trim($_POST['numero_prodata']);
+        $protocolo_cartorio = trim($_POST['protocolo_cartorio'] ?? ''); // NOVO CAMPO
         $ci = trim($_POST['ci'] ?? '');
         $nome_interessado = trim($_POST['nome_interessado']);
         $endereco = trim($_POST['endereco']);
@@ -41,11 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if (!empty($titulo)) {
             $sql = "UPDATE tarefas SET 
                     titulo = ?, descricao = ?, prioridade = ?, 
-                    categoria_id = ?, numero_prodata = ?, ci = ?, nome_interessado = ?, endereco = ?, cci = ? 
+                    categoria_id = ?, numero_prodata = ?, protocolo_cartorio = ?, ci = ?, nome_interessado = ?, endereco = ?, cci = ? 
                     WHERE id = ?";
             
             $stmt = $pdo->prepare($sql);
-            if ($stmt->execute([$titulo, $descricao, $prioridade, $categoria_id, $num_prodata, $ci, $nome_interessado, $endereco, $cci, $tarefa_id])) {
+            if ($stmt->execute([$titulo, $descricao, $prioridade, $categoria_id, $num_prodata, $protocolo_cartorio, $ci, $nome_interessado, $endereco, $cci, $tarefa_id])) {
                 $msg = "Dados atualizados com sucesso.";
                 $desc_hist = "Atualizou dados gerais da tarefa (Título: $titulo)";
                 $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'edicao', ?)")
@@ -61,14 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // 1.5. EDIÇÃO RÁPIDA (DADOS DO PROCESSO INLINE)
     if (isset($_POST['acao']) && $_POST['acao'] == 'editar_processo') {
         $num_prodata = trim($_POST['numero_prodata']);
+        $protocolo_cartorio = trim($_POST['protocolo_cartorio']); // NOVO CAMPO
         $ci = trim($_POST['ci']);
         $cci = trim($_POST['cci']);
         $nome_interessado = trim($_POST['nome_interessado']);
         $endereco = trim($_POST['endereco']);
 
-        $sql = "UPDATE tarefas SET numero_prodata = ?, ci = ?, cci = ?, nome_interessado = ?, endereco = ? WHERE id = ?";
+        $sql = "UPDATE tarefas SET numero_prodata = ?, protocolo_cartorio = ?, ci = ?, cci = ?, nome_interessado = ?, endereco = ? WHERE id = ?";
         $stmt = $pdo->prepare($sql);
-        if ($stmt->execute([$num_prodata, $ci, $cci, $nome_interessado, $endereco, $tarefa_id])) {
+        if ($stmt->execute([$num_prodata, $protocolo_cartorio, $ci, $cci, $nome_interessado, $endereco, $tarefa_id])) {
             $msg = "Dados do processo atualizados.";
             $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'edicao', ?)")
                 ->execute([$tarefa_id, $usuario_logado, "Atualizou os dados do processo (CI, Prodata, etc) rapidamente pelo painel."]);
@@ -164,42 +166,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 
-    // 4. TRANSFERIR TAREFA
+    // 4. TRANSFERIR TAREFA (COM BLOQUEIO PARA NÍVEL 7 - PÚBLICO)
     if (isset($_POST['acao']) && $_POST['acao'] == 'transferir_confirmado') {
-        $novo_dono_id = intval($_POST['novo_usuario_id']); 
-        $motivo = trim($_POST['obs_transferencia']); 
-        $novo_prazo = $_POST['novo_prazo']; 
-
-        if (empty($motivo) || $novo_dono_id == 0) {
-            $erro = "Selecione um usuário válido e justifique.";
+        if ($nivel_logado >= 7) {
+            $erro = "Você não tem permissão para transferir tarefas.";
         } else {
-            $stmtTarefa = $pdo->prepare("SELECT titulo, protocolo, prazo FROM tarefas WHERE id = ?");
-            $stmtTarefa->execute([$tarefa_id]);
-            $tarefaAtual = $stmtTarefa->fetch();
+            $novo_dono_id = intval($_POST['novo_usuario_id']); 
+            $motivo = trim($_POST['obs_transferencia']); 
+            $novo_prazo = $_POST['novo_prazo']; 
 
-            $stmtUser = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
-            $stmtUser->execute([$novo_dono_id]);
-            $nomeNovo = $stmtUser->fetchColumn();
+            if (empty($motivo) || $novo_dono_id == 0) {
+                $erro = "Selecione um usuário válido e justifique.";
+            } else {
+                $stmtTarefa = $pdo->prepare("SELECT titulo, protocolo, prazo FROM tarefas WHERE id = ?");
+                $stmtTarefa->execute([$tarefa_id]);
+                $tarefaAtual = $stmtTarefa->fetch();
 
-            $prazoFinal = !empty($novo_prazo) ? $novo_prazo : $tarefaAtual['prazo'];
+                $stmtUser = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
+                $stmtUser->execute([$novo_dono_id]);
+                $nomeNovo = $stmtUser->fetchColumn();
 
-            $pdo->prepare("UPDATE tarefas SET usuario_id = ?, prazo = ? WHERE id = ?")->execute([$novo_dono_id, $prazoFinal, $tarefa_id]);
+                $prazoFinal = !empty($novo_prazo) ? $novo_prazo : $tarefaAtual['prazo'];
 
-            $data_hist = date('d/m/Y H:i', strtotime($prazoFinal));
-            $desc = "Transferiu para: " . $nomeNovo . ".\nNovo Prazo: " . $data_hist . ".\nMotivo: " . $motivo;
-            $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'transferencia', ?)")
-                ->execute([$tarefa_id, $usuario_logado, $desc]);
+                $pdo->prepare("UPDATE tarefas SET usuario_id = ?, prazo = ? WHERE id = ?")->execute([$novo_dono_id, $prazoFinal, $tarefa_id]);
 
-            $msgNotif = "Nova tarefa recebida (Prazo: $data_hist). Transferida por " . $_SESSION['usuario_nome'];
-            $pdo->prepare("INSERT INTO notificacoes (usuario_id, mensagem, link) VALUES (?, ?, ?)")
-                ->execute([$novo_dono_id, $msgNotif, "detalhes_tarefa.php?id=$tarefa_id"]);
+                $data_hist = date('d/m/Y H:i', strtotime($prazoFinal));
+                $desc = "Transferiu para: " . $nomeNovo . ".\nNovo Prazo: " . $data_hist . ".\nMotivo: " . $motivo;
+                $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'transferencia', ?)")
+                    ->execute([$tarefa_id, $usuario_logado, $desc]);
 
-            $transferencia_sucesso = true;
-            $dados_recibo = [
-                'protocolo' => $tarefaAtual['protocolo'], 'titulo' => $tarefaAtual['titulo'],
-                'de' => $_SESSION['usuario_nome'], 'para' => $nomeNovo,
-                'motivo' => $motivo, 'prazo' => $data_hist, 'data_transf' => date('d/m/Y H:i')
-            ];
+                $msgNotif = "Nova tarefa recebida (Prazo: $data_hist). Transferida por " . $_SESSION['usuario_nome'];
+                $pdo->prepare("INSERT INTO notificacoes (usuario_id, mensagem, link) VALUES (?, ?, ?)")
+                    ->execute([$novo_dono_id, $msgNotif, "detalhes_tarefa.php?id=$tarefa_id"]);
+
+                $transferencia_sucesso = true;
+                $dados_recibo = [
+                    'protocolo' => $tarefaAtual['protocolo'], 'titulo' => $tarefaAtual['titulo'],
+                    'de' => $_SESSION['usuario_nome'], 'para' => $nomeNovo,
+                    'motivo' => $motivo, 'prazo' => $data_hist, 'data_transf' => date('d/m/Y H:i')
+                ];
+            }
         }
     }
 
@@ -221,17 +227,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 
-    // 6. CONCLUIR
+    // 6. CONCLUIR / REABRIR TAREFA
     if (isset($_POST['acao'])) {
         if ($_POST['acao'] == 'concluir') {
             $pdo->prepare("UPDATE tarefas SET status = 'concluido' WHERE id = ?")->execute([$tarefa_id]);
             $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'status', 'Concluiu a tarefa')")->execute([$tarefa_id, $usuario_logado]);
             
             $pdo->prepare("DELETE FROM tarefa_anexos WHERE tarefa_id = ?")->execute([$tarefa_id]);
-             $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[IMG_ID:', '[Anexo removido - ID:') WHERE tarefa_id = $tarefa_id");
-             $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[Anexo:', '[Anexo removido: ') WHERE tarefa_id = $tarefa_id");
+            $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[IMG_ID:', '[Anexo removido - ID:') WHERE tarefa_id = $tarefa_id");
+            $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[Anexo:', '[Anexo removido: ') WHERE tarefa_id = $tarefa_id");
 
             $msg = "Tarefa concluída!";
+        } elseif ($_POST['acao'] == 'reabrir') {
+            $pdo->prepare("UPDATE tarefas SET status = 'pendente' WHERE id = ?")->execute([$tarefa_id]);
+            $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'status', 'Reabriu a tarefa')")->execute([$tarefa_id, $usuario_logado]);
+            $msg = "Tarefa reaberta e colocada em andamento!";
         }
     }
 
@@ -672,6 +682,10 @@ function formatBytes($bytes, $precision = 2) {
                                 <span class="list-data-value"><?= !empty($tarefa['numero_prodata']) ? htmlspecialchars($tarefa['numero_prodata']) : '---' ?></span>
                             </div>
                             <div class="list-data-item">
+                                <span class="list-data-label">Protocolo Cartório</span>
+                                <span class="list-data-value"><?= !empty($tarefa['protocolo_cartorio']) ? htmlspecialchars($tarefa['protocolo_cartorio']) : '---' ?></span>
+                            </div>
+                            <div class="list-data-item">
                                 <span class="list-data-label">Comunicação Interna (CI)</span>
                                 <span class="list-data-value"><?= !empty($tarefa['ci']) ? htmlspecialchars($tarefa['ci']) : '---' ?></span>
                             </div>
@@ -700,6 +714,10 @@ function formatBytes($bytes, $precision = 2) {
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Nº Prodata</label>
                                     <input type="text" name="numero_prodata" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['numero_prodata']) ?>">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="small fw-bold text-muted mb-1">Protocolo Cartório</label>
+                                    <input type="text" name="protocolo_cartorio" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['protocolo_cartorio'] ?? '') ?>">
                                 </div>
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Comunicação Interna (CI)</label>
@@ -736,8 +754,16 @@ function formatBytes($bytes, $precision = 2) {
                                         <i class="fa-solid fa-flag-checkered me-2"></i> Concluir Tarefa
                                     </button>
                                 </form>
+                            <?php else: ?>
+                                <form method="POST" onsubmit="return confirm('Tem certeza que deseja reabrir esta tarefa? Ela voltará para a lista de pendentes.')">
+                                    <input type="hidden" name="acao" value="reabrir">
+                                    <button class="btn btn-warning text-dark w-100 py-2 rounded-3 fw-bold shadow-sm">
+                                        <i class="fa-solid fa-folder-open me-2"></i> Reabrir Tarefa
+                                    </button>
+                                </form>
                             <?php endif; ?>
                             
+                            <?php if ($nivel_logado <= 6): ?>
                             <div class="accordion" id="accTransfer">
                                 <div class="accordion-item border-0 shadow-sm rounded-3 overflow-hidden">
                                     <h2 class="accordion-header">
@@ -759,8 +785,8 @@ function formatBytes($bytes, $precision = 2) {
                                     </div>
                                 </div>
                             </div>
-                            
-                            </div>
+                            <?php endif; ?>
+                        </div>
                     </div>
 
                     <div class="card-details overflow-hidden mb-4">
@@ -879,6 +905,10 @@ function formatBytes($bytes, $precision = 2) {
                                 <input type="text" name="numero_prodata" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['numero_prodata']) ?>">
                             </div>
                             <div class="col-md-4">
+                                <label class="small text-muted">Protocolo Cartório</label>
+                                <input type="text" name="protocolo_cartorio" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['protocolo_cartorio'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
                                 <label class="small text-muted">CI (Comunicação Interna)</label>
                                 <input type="text" name="ci" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['ci'] ?? '') ?>">
                             </div>
@@ -886,11 +916,11 @@ function formatBytes($bytes, $precision = 2) {
                                 <label class="small text-muted">CCI</label>
                                 <input type="text" name="cci" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['cci']) ?>">
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-8">
                                 <label class="small text-muted">Interessado</label>
                                 <input type="text" name="nome_interessado" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['nome_interessado']) ?>">
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-12">
                                 <label class="small text-muted">Endereço</label>
                                 <input type="text" name="endereco" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['endereco']) ?>">
                             </div>
@@ -933,25 +963,27 @@ function formatBytes($bytes, $precision = 2) {
         const listaSugestoes = document.getElementById('user-suggestions');
         const hiddenId = document.getElementById('id_novo_dono');
 
-        buscaInput.addEventListener('input', function() {
-            const termo = this.value.toLowerCase();
-            listaSugestoes.innerHTML = '';
-            hiddenId.value = ''; 
-            if(termo.length < 2) { listaSugestoes.style.display = 'none'; return; }
-            const filtrados = usuarios.filter(u => u.nome.toLowerCase().includes(termo));
-            if(filtrados.length > 0) {
-                listaSugestoes.style.display = 'block';
-                filtrados.forEach(u => {
-                    const div = document.createElement('div');
-                    div.className = 'user-item';
-                    div.innerHTML = `<i class="fa-solid fa-user me-2 text-muted"></i>${u.nome}`;
-                    div.onclick = () => { buscaInput.value = u.nome; hiddenId.value = u.id; listaSugestoes.style.display = 'none'; };
-                    listaSugestoes.appendChild(div);
-                });
-            } else { listaSugestoes.style.display = 'none'; }
-        });
+        if(buscaInput) {
+            buscaInput.addEventListener('input', function() {
+                const termo = this.value.toLowerCase();
+                listaSugestoes.innerHTML = '';
+                hiddenId.value = ''; 
+                if(termo.length < 2) { listaSugestoes.style.display = 'none'; return; }
+                const filtrados = usuarios.filter(u => u.nome.toLowerCase().includes(termo));
+                if(filtrados.length > 0) {
+                    listaSugestoes.style.display = 'block';
+                    filtrados.forEach(u => {
+                        const div = document.createElement('div');
+                        div.className = 'user-item';
+                        div.innerHTML = `<i class="fa-solid fa-user me-2 text-muted"></i>${u.nome}`;
+                        div.onclick = () => { buscaInput.value = u.nome; hiddenId.value = u.id; listaSugestoes.style.display = 'none'; };
+                        listaSugestoes.appendChild(div);
+                    });
+                } else { listaSugestoes.style.display = 'none'; }
+            });
+        }
 
-        document.addEventListener('click', (e) => { if(e.target !== buscaInput && e.target !== listaSugestoes) { listaSugestoes.style.display = 'none'; } });
+        document.addEventListener('click', (e) => { if(e.target !== buscaInput && e.target !== listaSugestoes && listaSugestoes) { listaSugestoes.style.display = 'none'; } });
 
         function abrirConfirmacao() {
             const id = document.getElementById('id_novo_dono').value;
