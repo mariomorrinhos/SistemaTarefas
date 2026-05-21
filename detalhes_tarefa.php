@@ -1,5 +1,6 @@
 <?php
 // detalhes_tarefa.php
+ob_start(); // Previne erro de Headers already sent
 session_start();
 require_once 'config/database/conexao.php';
 
@@ -25,7 +26,7 @@ $dados_recibo = [];
 // -------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
-    // 1. EDITAR TAREFA (MODAL COMPLETO)
+    // 1. EDITAR TAREFA
     if (isset($_POST['acao']) && $_POST['acao'] == 'editar_tarefa') {
         $titulo = trim($_POST['titulo']);
         $descricao = trim($_POST['descricao']);
@@ -33,7 +34,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         $categoria_id = !empty($_POST['categoria_id']) ? intval($_POST['categoria_id']) : null;
         $num_prodata = trim($_POST['numero_prodata']);
-        $protocolo_cartorio = trim($_POST['protocolo_cartorio'] ?? ''); // NOVO CAMPO
+        $processo_externo = trim($_POST['processo_externo'] ?? '');
+        $protocolo_cartorio = trim($_POST['protocolo_cartorio'] ?? ''); 
+        $link_acesso = trim($_POST['link_acesso'] ?? ''); 
         $ci = trim($_POST['ci'] ?? '');
         $nome_interessado = trim($_POST['nome_interessado']);
         $endereco = trim($_POST['endereco']);
@@ -42,13 +45,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if (!empty($titulo)) {
             $sql = "UPDATE tarefas SET 
                     titulo = ?, descricao = ?, prioridade = ?, 
-                    categoria_id = ?, numero_prodata = ?, protocolo_cartorio = ?, ci = ?, nome_interessado = ?, endereco = ?, cci = ? 
+                    categoria_id = ?, numero_prodata = ?, processo_externo = ?, protocolo_cartorio = ?, link_acesso = ?, ci = ?, nome_interessado = ?, endereco = ?, cci = ? 
                     WHERE id = ?";
             
             $stmt = $pdo->prepare($sql);
-            if ($stmt->execute([$titulo, $descricao, $prioridade, $categoria_id, $num_prodata, $protocolo_cartorio, $ci, $nome_interessado, $endereco, $cci, $tarefa_id])) {
+            if ($stmt->execute([$titulo, $descricao, $prioridade, $categoria_id, $num_prodata, $processo_externo, $protocolo_cartorio, $link_acesso, $ci, $nome_interessado, $endereco, $cci, $tarefa_id])) {
                 $msg = "Dados atualizados com sucesso.";
-                $desc_hist = "Atualizou dados gerais da tarefa (Título: $titulo)";
+                $desc_hist = "Atualizou dados da tarefa (Título: $titulo)";
                 $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'edicao', ?)")
                     ->execute([$tarefa_id, $usuario_logado, $desc_hist]);
             } else {
@@ -62,18 +65,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // 1.5. EDIÇÃO RÁPIDA (DADOS DO PROCESSO INLINE)
     if (isset($_POST['acao']) && $_POST['acao'] == 'editar_processo') {
         $num_prodata = trim($_POST['numero_prodata']);
-        $protocolo_cartorio = trim($_POST['protocolo_cartorio']); // NOVO CAMPO
+        $processo_externo = trim($_POST['processo_externo'] ?? '');
+        $protocolo_cartorio = trim($_POST['protocolo_cartorio'] ?? ''); 
+        $link_acesso = trim($_POST['link_acesso'] ?? ''); 
         $ci = trim($_POST['ci']);
         $cci = trim($_POST['cci']);
         $nome_interessado = trim($_POST['nome_interessado']);
         $endereco = trim($_POST['endereco']);
 
-        $sql = "UPDATE tarefas SET numero_prodata = ?, protocolo_cartorio = ?, ci = ?, cci = ?, nome_interessado = ?, endereco = ? WHERE id = ?";
+        $sql = "UPDATE tarefas SET numero_prodata = ?, processo_externo = ?, protocolo_cartorio = ?, link_acesso = ?, ci = ?, cci = ?, nome_interessado = ?, endereco = ? WHERE id = ?";
         $stmt = $pdo->prepare($sql);
-        if ($stmt->execute([$num_prodata, $protocolo_cartorio, $ci, $cci, $nome_interessado, $endereco, $tarefa_id])) {
+        if ($stmt->execute([$num_prodata, $processo_externo, $protocolo_cartorio, $link_acesso, $ci, $cci, $nome_interessado, $endereco, $tarefa_id])) {
             $msg = "Dados do processo atualizados.";
             $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'edicao', ?)")
-                ->execute([$tarefa_id, $usuario_logado, "Atualizou os dados do processo (CI, Prodata, etc) rapidamente pelo painel."]);
+                ->execute([$tarefa_id, $usuario_logado, "Atualizou os dados do processo (CI, Prodata, Processo Externo, etc) rapidamente pelo painel."]);
         } else {
             $erro = "Erro ao atualizar dados do processo.";
         }
@@ -97,21 +102,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $mimeType = finfo_file($finfo, $tmpName);
                 finfo_close($finfo);
 
-                // Permite PDF, Imagens e Documentos Word
-                $permitidos = [
-                    'application/pdf', 
-                    'image/jpeg', 
-                    'image/png', 
-                    'image/webp', 
-                    'image/gif',
-                    'application/msword', // .doc
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // .docx
-                ];
+                $permitidos = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
                 if ($tamanho > 4194304) { 
                     throw new Exception("O arquivo excede o limite de 4MB.");
                 } elseif (!in_array($mimeType, $permitidos)) {
-                    throw new Exception("Formato inválido. Apenas PDF, Imagens e Word.");
+                    throw new Exception("Formato inválido ($mimeType). Apenas PDF e Imagens.");
                 } else {
                     $conteudo = file_get_contents($tmpName);
                     
@@ -166,46 +162,42 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 
-    // 4. TRANSFERIR TAREFA (COM BLOQUEIO PARA NÍVEL 7 - PÚBLICO)
+    // 4. TRANSFERIR TAREFA
     if (isset($_POST['acao']) && $_POST['acao'] == 'transferir_confirmado') {
-        if ($nivel_logado >= 7) {
-            $erro = "Você não tem permissão para transferir tarefas.";
+        $novo_dono_id = intval($_POST['novo_usuario_id']); 
+        $motivo = trim($_POST['obs_transferencia']); 
+        $novo_prazo = $_POST['novo_prazo']; 
+
+        if (empty($motivo) || $novo_dono_id == 0) {
+            $erro = "Selecione um usuário válido e justifique.";
         } else {
-            $novo_dono_id = intval($_POST['novo_usuario_id']); 
-            $motivo = trim($_POST['obs_transferencia']); 
-            $novo_prazo = $_POST['novo_prazo']; 
+            $stmtTarefa = $pdo->prepare("SELECT titulo, protocolo, prazo FROM tarefas WHERE id = ?");
+            $stmtTarefa->execute([$tarefa_id]);
+            $tarefaAtual = $stmtTarefa->fetch();
 
-            if (empty($motivo) || $novo_dono_id == 0) {
-                $erro = "Selecione um usuário válido e justifique.";
-            } else {
-                $stmtTarefa = $pdo->prepare("SELECT titulo, protocolo, prazo FROM tarefas WHERE id = ?");
-                $stmtTarefa->execute([$tarefa_id]);
-                $tarefaAtual = $stmtTarefa->fetch();
+            $stmtUser = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
+            $stmtUser->execute([$novo_dono_id]);
+            $nomeNovo = $stmtUser->fetchColumn();
 
-                $stmtUser = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
-                $stmtUser->execute([$novo_dono_id]);
-                $nomeNovo = $stmtUser->fetchColumn();
+            $prazoFinal = !empty($novo_prazo) ? $novo_prazo : $tarefaAtual['prazo'];
 
-                $prazoFinal = !empty($novo_prazo) ? $novo_prazo : $tarefaAtual['prazo'];
+            $pdo->prepare("UPDATE tarefas SET usuario_id = ?, prazo = ? WHERE id = ?")->execute([$novo_dono_id, $prazoFinal, $tarefa_id]);
 
-                $pdo->prepare("UPDATE tarefas SET usuario_id = ?, prazo = ? WHERE id = ?")->execute([$novo_dono_id, $prazoFinal, $tarefa_id]);
+            $data_hist = date('d/m/Y H:i', strtotime($prazoFinal));
+            $desc = "Transferiu para: " . $nomeNovo . ".\nNovo Prazo: " . $data_hist . ".\nMotivo: " . $motivo;
+            $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'transferencia', ?)")
+                ->execute([$tarefa_id, $usuario_logado, $desc]);
 
-                $data_hist = date('d/m/Y H:i', strtotime($prazoFinal));
-                $desc = "Transferiu para: " . $nomeNovo . ".\nNovo Prazo: " . $data_hist . ".\nMotivo: " . $motivo;
-                $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'transferencia', ?)")
-                    ->execute([$tarefa_id, $usuario_logado, $desc]);
+            $msgNotif = "Nova tarefa recebida (Prazo: $data_hist). Transferida por " . $_SESSION['usuario_nome'];
+            $pdo->prepare("INSERT INTO notificacoes (usuario_id, mensagem, link) VALUES (?, ?, ?)")
+                ->execute([$novo_dono_id, $msgNotif, "detalhes_tarefa.php?id=$tarefa_id"]);
 
-                $msgNotif = "Nova tarefa recebida (Prazo: $data_hist). Transferida por " . $_SESSION['usuario_nome'];
-                $pdo->prepare("INSERT INTO notificacoes (usuario_id, mensagem, link) VALUES (?, ?, ?)")
-                    ->execute([$novo_dono_id, $msgNotif, "detalhes_tarefa.php?id=$tarefa_id"]);
-
-                $transferencia_sucesso = true;
-                $dados_recibo = [
-                    'protocolo' => $tarefaAtual['protocolo'], 'titulo' => $tarefaAtual['titulo'],
-                    'de' => $_SESSION['usuario_nome'], 'para' => $nomeNovo,
-                    'motivo' => $motivo, 'prazo' => $data_hist, 'data_transf' => date('d/m/Y H:i')
-                ];
-            }
+            $transferencia_sucesso = true;
+            $dados_recibo = [
+                'protocolo' => $tarefaAtual['protocolo'], 'titulo' => $tarefaAtual['titulo'],
+                'de' => $_SESSION['usuario_nome'], 'para' => $nomeNovo,
+                'motivo' => $motivo, 'prazo' => $data_hist, 'data_transf' => date('d/m/Y H:i')
+            ];
         }
     }
 
@@ -227,9 +219,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 
-    // 6. CONCLUIR / REABRIR TAREFA
+    // 6. ARQUIVAR / CONCLUIR / REABRIR
     if (isset($_POST['acao'])) {
-        if ($_POST['acao'] == 'concluir') {
+        if ($_POST['acao'] == 'arquivar' || $_POST['acao'] == 'desarquivar') {
+            $novo_status = ($_POST['acao'] == 'arquivar') ? 'arquivado' : 'pendente';
+            $acao_texto = ($_POST['acao'] == 'arquivar') ? 'Arquivou a tarefa' : 'Desarquivou a tarefa';
+            $pdo->prepare("UPDATE tarefas SET status = ? WHERE id = ?")->execute([$novo_status, $tarefa_id]);
+            $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'status', ?)")->execute([$tarefa_id, $usuario_logado, $acao_texto]);
+            
+            if ($novo_status == 'arquivado') {
+                $pdo->prepare("DELETE FROM tarefa_anexos WHERE tarefa_id = ?")->execute([$tarefa_id]);
+                $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[IMG_ID:', '[Anexo removido - ID:') WHERE tarefa_id = $tarefa_id");
+                $pdo->query("UPDATE historico_tarefas SET descricao = REPLACE(descricao, '[Anexo:', '[Anexo removido: ') WHERE tarefa_id = $tarefa_id");
+            }
+            $msg = "Status alterado.";
+        } elseif ($_POST['acao'] == 'concluir') {
             $pdo->prepare("UPDATE tarefas SET status = 'concluido' WHERE id = ?")->execute([$tarefa_id]);
             $pdo->prepare("INSERT INTO historico_tarefas (tarefa_id, usuario_id, acao, descricao) VALUES (?, ?, 'status', 'Concluiu a tarefa')")->execute([$tarefa_id, $usuario_logado]);
             
@@ -257,21 +261,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $mimeType = finfo_file($finfo, $tmpName);
                 finfo_close($finfo);
 
-                // Permite PDF, Imagens e Documentos Word
-                $permitidos = [
-                    'application/pdf', 
-                    'image/jpeg', 
-                    'image/png', 
-                    'image/webp', 
-                    'image/gif',
-                    'application/msword', // .doc
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // .docx
-                ];
+                $permitidos = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
                 if ($tamanho > 4194304) {
                     throw new Exception("Arquivo > 4MB.");
                 } elseif (!in_array($mimeType, $permitidos)) {
-                    throw new Exception("Apenas PDF, Imagens ou arquivos Word.");
+                    throw new Exception("Apenas PDF ou Imagens.");
                 } else {
                     $conteudo = file_get_contents($tmpName);
                     
@@ -422,51 +417,6 @@ function formatBytes($bytes, $precision = 2) {
 
         .hist-title-box { background-color: #000; color: white; padding: 12px 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
 
-        /* --- ESTILO RODAPÉ --- */
-        .footer-custom {
-            background-color: #ffffff;
-            border-top: 4px solid #198754; 
-            padding: 1.5rem 0;
-            margin-top: auto;
-        }
-        .footer-dev-label {
-            font-size: 0.7rem;
-            font-weight: 800;
-            color: #1e3a8a; 
-            text-transform: uppercase;
-            margin-bottom: 0.2rem;
-            letter-spacing: 0.5px;
-        }
-        .footer-dev-name {
-            font-size: 1.1rem;
-            font-weight: 800;
-            color: #0f766e; 
-            text-decoration: none;
-        }
-        .footer-dev-name:hover {
-            color: #047857;
-        }
-        .footer-social-btn {
-            width: 45px;
-            height: 45px;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1.5rem;
-            text-decoration: none;
-            transition: transform 0.2s;
-            margin: 0 0.5rem;
-        }
-        .footer-social-btn:hover {
-            transform: scale(1.1);
-            color: white;
-        }
-        .footer-whatsapp { background-color: #25D366; box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4); }
-        .footer-instagram { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); box-shadow: 0 4px 15px rgba(220, 39, 67, 0.4); }
-        .footer-version { background-color: #111827; color: white; font-weight: 700; font-size: 0.85rem; padding: 6px 16px; border-radius: 50px; display: inline-block; }
-
         @media print {
             @page { margin: 0; size: A4; }
             body { background: white; -webkit-print-color-adjust: exact; }
@@ -474,29 +424,28 @@ function formatBytes($bytes, $precision = 2) {
             .container { max-width: 100% !important; padding: 0 !important; }
             .card-details { box-shadow: none !important; border: 1px solid #ccc !important; }
             .receipt-container { box-shadow: none !important; border: 1px solid #000 !important; margin: 0 !important; width: 100% !important; }
-            .footer-custom { display: none; }
         }
     </style>
 </head>
 <body>
 
     <?php if($transferencia_sucesso): ?>
-        <div class="receipt-container flex-grow-1">
+        <div class="receipt-container">
             <div class="text-center mb-4">
                 <i class="fa-solid fa-circle-check text-success fa-3x mb-3 no-print"></i>
                 <h4 class="fw-bold text-success no-print">Transferência Realizada!</h4>
                 <p class="text-muted small no-print">A tarefa foi repassada com sucesso.</p>
             </div>
             <div class="receipt-title text-center">Recibo de Transferência</div>
-            <div class="receipt-row"><span class="receipt-label">Protocolo</span><span class="receipt-value">#<?= $dados_recibo['protocolo'] ?></span></div>
-            <div class="receipt-row"><span class="receipt-label">Tarefa</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['titulo']) ?></span></div>
-            <div class="receipt-row"><span class="receipt-label">De (Origem)</span><span class="receipt-value"><?= $dados_recibo['de'] ?></span></div>
-            <div class="receipt-row"><span class="receipt-label">Para (Destino)</span><span class="receipt-value"><?= $dados_recibo['para'] ?></span></div>
-            <div class="receipt-row"><span class="receipt-label">Novo Prazo</span><span class="receipt-value"><?= $dados_recibo['prazo'] ?></span></div>
-            <div class="receipt-row"><span class="receipt-label">Data Operação</span><span class="receipt-value"><?= $dados_recibo['data_transf'] ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">Protocolo</span><span class="receipt-value">#<?= htmlspecialchars($dados_recibo['protocolo'] ?? '') ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">Tarefa</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['titulo'] ?? '') ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">De (Origem)</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['de'] ?? '') ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">Para (Destino)</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['para'] ?? '') ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">Novo Prazo</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['prazo'] ?? '') ?></span></div>
+            <div class="receipt-row"><span class="receipt-label">Data Operação</span><span class="receipt-value"><?= htmlspecialchars($dados_recibo['data_transf'] ?? '') ?></span></div>
             <div class="mt-4 p-3 bg-light border rounded">
                 <span class="receipt-label d-block mb-1">Motivo / Observação</span>
-                <span class="receipt-value" style="font-weight: 400;"><?= nl2br(htmlspecialchars($dados_recibo['motivo'])) ?></span>
+                <span class="receipt-value" style="font-weight: 400;"><?= nl2br(htmlspecialchars($dados_recibo['motivo'] ?? '')) ?></span>
             </div>
             <div class="mt-5 text-center no-print">
                 <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 me-2"><i class="fa-solid fa-print me-2"></i>Imprimir</button>
@@ -527,25 +476,25 @@ function formatBytes($bytes, $precision = 2) {
                 <div class="card-details">
                     <div class="status-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <div>
-                            <span class="badge badge-protocol px-3 py-2 rounded-pill mb-2">#<?= $tarefa['protocolo'] ?></span>
-                            <?php if($tarefa['categoria_nome']): ?>
-                                <span class="badge bg-secondary rounded-pill px-2 py-1 mb-2 ms-1" style="background-color: <?= $tarefa['categoria_cor'] ?? '#6c757d' ?> !important;"><?= htmlspecialchars($tarefa['categoria_nome']) ?></span>
+                            <span class="badge badge-protocol px-3 py-2 rounded-pill mb-2">#<?= htmlspecialchars($tarefa['protocolo'] ?? '') ?></span>
+                            <?php if(!empty($tarefa['categoria_nome'])): ?>
+                                <span class="badge bg-secondary rounded-pill px-2 py-1 mb-2 ms-1" style="background-color: <?= htmlspecialchars($tarefa['categoria_cor'] ?? '#6c757d') ?> !important;"><?= htmlspecialchars($tarefa['categoria_nome']) ?></span>
                             <?php endif; ?>
                             <div class="d-flex align-items-center gap-2">
-                                <h4 class="fw-bold mb-0 text-dark"><?= htmlspecialchars($tarefa['titulo']) ?></h4>
+                                <h4 class="fw-bold mb-0 text-dark"><?= htmlspecialchars($tarefa['titulo'] ?? '') ?></h4>
                                 <button class="btn btn-sm btn-light border rounded-circle text-primary no-print" title="Editar Tarefa" data-bs-toggle="modal" data-bs-target="#modalEditarTarefa">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
                             </div>
                         </div>
                         <div class="text-end">
-                            <span class="badge rounded-pill bg-light text-dark border px-3 py-2"><i class="fa-solid fa-flag me-1" style="color: <?= getCorPrioridade($tarefa['prioridade']) ?>"></i> <?= ucfirst($tarefa['prioridade']) ?></span>
-                            <span class="badge rounded-pill bg-dark px-3 py-2 ms-1"><?= ucfirst($tarefa['status']) ?></span>
+                            <span class="badge rounded-pill bg-light text-dark border px-3 py-2"><i class="fa-solid fa-flag me-1" style="color: <?= getCorPrioridade($tarefa['prioridade'] ?? 'media') ?>"></i> <?= ucfirst($tarefa['prioridade'] ?? 'Media') ?></span>
+                            <span class="badge rounded-pill bg-dark px-3 py-2 ms-1"><?= ucfirst($tarefa['status'] ?? 'Pendente') ?></span>
                         </div>
                     </div>
                     <div class="p-4">
                         <h6 class="text-muted text-uppercase small fw-bold mb-3 no-print">Descrição</h6>
-                        <p class="text-secondary text-justify" style="line-height: 1.6;"><?= nl2br(htmlspecialchars($tarefa['descricao'])) ?></p>
+                        <p class="text-secondary text-justify" style="line-height: 1.6;"><?= nl2br(htmlspecialchars($tarefa['descricao'] ?? '')) ?></p>
 
                         <div class="mt-4 pt-3 border-top no-print">
                             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -560,10 +509,10 @@ function formatBytes($bytes, $precision = 2) {
                                     <form method="POST" enctype="multipart/form-data">
                                         <input type="hidden" name="acao" value="upload_anexo">
                                         <div class="input-group">
-                                            <input type="file" name="anexo_novo" class="form-control" accept="application/pdf, image/*, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+                                            <input type="file" name="anexo_novo" class="form-control" accept="application/pdf, image/*" required>
                                             <button class="btn btn-primary" type="submit">Enviar</button>
                                         </div>
-                                        <div class="form-text small mt-1">Máximo 4MB. PDF, Imagens e Word (.doc, .docx).</div>
+                                        <div class="form-text small mt-1">Máximo 4MB. PDF ou Imagens.</div>
                                     </form>
                                 </div>
                             </div>
@@ -574,9 +523,9 @@ function formatBytes($bytes, $precision = 2) {
                                         <div class="anexo-info">
                                             <i class="fa-solid fa-file-contract anexo-icon"></i>
                                             <div>
-                                                <div class="fw-bold text-dark small"><?= htmlspecialchars($anexo['nome_arquivo']) ?></div>
+                                                <div class="fw-bold text-dark small"><?= htmlspecialchars($anexo['nome_arquivo'] ?? '') ?></div>
                                                 <div class="text-muted" style="font-size: 0.65rem;">
-                                                    <?= formatBytes($anexo['tamanho']) ?> • <?= date('d/m H:i', strtotime($anexo['criado_em'])) ?>
+                                                    <?= formatBytes($anexo['tamanho'] ?? 0) ?> • <?= date('d/m H:i', strtotime($anexo['criado_em'])) ?>
                                                 </div>
                                             </div>
                                         </div>
@@ -598,8 +547,8 @@ function formatBytes($bytes, $precision = 2) {
                         </div>
 
                         <div class="row mt-4 pt-4 border-top no-print">
-                            <div class="col-md-4 mb-3"><small class="text-muted d-block">Responsável Atual</small><span class="fw-bold text-dark"><i class="fa-solid fa-user-circle me-1"></i> <?= $tarefa['responsavel'] ?></span></div>
-                            <div class="col-md-4 mb-3"><small class="text-muted d-block">Criado por</small><span class="fw-bold text-dark"><?= $tarefa['criador'] ?></span></div>
+                            <div class="col-md-4 mb-3"><small class="text-muted d-block">Responsável Atual</small><span class="fw-bold text-dark"><i class="fa-solid fa-user-circle me-1"></i> <?= htmlspecialchars($tarefa['responsavel'] ?? '---') ?></span></div>
+                            <div class="col-md-4 mb-3"><small class="text-muted d-block">Criado por</small><span class="fw-bold text-dark"><?= htmlspecialchars($tarefa['criador'] ?? '---') ?></span></div>
                             <div class="col-md-4 mb-3">
                                 <small class="text-muted d-block">Prazo</small>
                                 <div class="d-flex align-items-center">
@@ -624,7 +573,7 @@ function formatBytes($bytes, $precision = 2) {
                         
                         <div class="mb-3">
                             <label class="small text-muted mb-1"><i class="fa-solid fa-paperclip me-1"></i> Anexar Arquivo ou Foto (Opcional)</label>
-                            <input type="file" name="anexo_msg" class="form-control form-control-sm" accept="application/pdf, image/*, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                            <input type="file" name="anexo_msg" class="form-control form-control-sm" accept="application/pdf, image/*">
                         </div>
 
                         <div class="text-end"><button type="submit" class="btn btn-sm btn-success rounded-pill px-3 fw-bold">Salvar</button></div>
@@ -639,7 +588,7 @@ function formatBytes($bytes, $precision = 2) {
                             if($h['acao'] == 'anexo') $tipoIcon = 'fa-paperclip';
                             if($h['acao'] == 'edicao') $tipoIcon = 'fa-pen';
                             
-                            $texto = htmlspecialchars($h['descricao']);
+                            $texto = htmlspecialchars($h['descricao'] ?? '');
                             $texto = preg_replace_callback('/\[IMG_ID: (\d+)\]/', function($matches) {
                                 return '<a href="download_anexo.php?id='.$matches[1].'" target="_blank" class="hist-img-link"><img src="download_anexo.php?id='.$matches[1].'" class="hist-img shadow-sm" alt="Imagem Anexada"></a>';
                             }, $texto);
@@ -647,9 +596,9 @@ function formatBytes($bytes, $precision = 2) {
                         ?>
                         <div class="timeline-item">
                             <div class="timeline-dot"></div>
-                            <div class="timeline-meta d-flex justify-content-between"><span><i class="fa-solid fa-user me-1 no-print"></i> <?= $h['autor'] ?></span><span><?= date('d/m/Y H:i', strtotime($h['data_acao'])) ?></span></div>
+                            <div class="timeline-meta d-flex justify-content-between"><span><i class="fa-solid fa-user me-1 no-print"></i> <?= htmlspecialchars($h['autor'] ?? '') ?></span><span><?= date('d/m/Y H:i', strtotime($h['data_acao'])) ?></span></div>
                             <div class="timeline-content">
-                                <div class="mb-1 text-primary small text-uppercase fw-bold no-print"><i class="fa-solid <?= $tipoIcon ?> me-1"></i> <?= ucfirst($h['acao']) ?></div>
+                                <div class="mb-1 text-primary small text-uppercase fw-bold no-print"><i class="fa-solid <?= $tipoIcon ?> me-1"></i> <?= ucfirst(htmlspecialchars($h['acao'] ?? '')) ?></div>
                                 <div class="text-dark" style="white-space: pre-wrap;"><?= $texto ?></div>
                             </div>
                         </div>
@@ -674,7 +623,7 @@ function formatBytes($bytes, $precision = 2) {
                             <div class="list-data-item">
                                 <span class="list-data-label">Categoria</span>
                                 <span class="list-data-value text-primary">
-                                    <?= $tarefa['categoria_nome'] ? htmlspecialchars($tarefa['categoria_nome']) : '---' ?>
+                                    <?= !empty($tarefa['categoria_nome']) ? htmlspecialchars($tarefa['categoria_nome']) : '---' ?>
                                 </span>
                             </div>
                             <div class="list-data-item">
@@ -682,8 +631,24 @@ function formatBytes($bytes, $precision = 2) {
                                 <span class="list-data-value"><?= !empty($tarefa['numero_prodata']) ? htmlspecialchars($tarefa['numero_prodata']) : '---' ?></span>
                             </div>
                             <div class="list-data-item">
+                                <span class="list-data-label">Processo Externo</span>
+                                <span class="list-data-value"><?= !empty($tarefa['processo_externo']) ? htmlspecialchars($tarefa['processo_externo']) : '---' ?></span>
+                            </div>
+                            <div class="list-data-item">
                                 <span class="list-data-label">Protocolo Cartório</span>
                                 <span class="list-data-value"><?= !empty($tarefa['protocolo_cartorio']) ? htmlspecialchars($tarefa['protocolo_cartorio']) : '---' ?></span>
+                            </div>
+                            <div class="list-data-item">
+                                <span class="list-data-label">Link de Acesso</span>
+                                <span class="list-data-value">
+                                    <?php if (!empty($tarefa['link_acesso'])): ?>
+                                        <a href="<?= htmlspecialchars($tarefa['link_acesso']) ?>" target="_blank" class="text-primary text-decoration-none">
+                                            <i class="fa-solid fa-external-link-alt me-1"></i> Acessar Link
+                                        </a>
+                                    <?php else: ?>
+                                        ---
+                                    <?php endif; ?>
+                                </span>
                             </div>
                             <div class="list-data-item">
                                 <span class="list-data-label">Comunicação Interna (CI)</span>
@@ -695,13 +660,13 @@ function formatBytes($bytes, $precision = 2) {
                             </div>
                             <div class="list-data-item">
                                 <span class="list-data-label">Interessado</span>
-                                <span class="list-data-value text-truncate" title="<?= htmlspecialchars($tarefa['nome_interessado']) ?>">
+                                <span class="list-data-value text-truncate" title="<?= htmlspecialchars($tarefa['nome_interessado'] ?? '') ?>">
                                     <?= !empty($tarefa['nome_interessado']) ? htmlspecialchars($tarefa['nome_interessado']) : '---' ?>
                                 </span>
                             </div>
                             <div class="list-data-item">
                                 <span class="list-data-label">Endereço</span>
-                                <span class="list-data-value text-truncate" title="<?= htmlspecialchars($tarefa['endereco']) ?>">
+                                <span class="list-data-value text-truncate" title="<?= htmlspecialchars($tarefa['endereco'] ?? '') ?>">
                                     <?= !empty($tarefa['endereco']) ? htmlspecialchars($tarefa['endereco']) : '---' ?>
                                 </span>
                             </div>
@@ -713,11 +678,19 @@ function formatBytes($bytes, $precision = 2) {
                                 
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Nº Prodata</label>
-                                    <input type="text" name="numero_prodata" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['numero_prodata']) ?>">
+                                    <input type="text" name="numero_prodata" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['numero_prodata'] ?? '') ?>">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="small fw-bold text-muted mb-1">Processo Externo</label>
+                                    <input type="text" name="processo_externo" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['processo_externo'] ?? '') ?>">
                                 </div>
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Protocolo Cartório</label>
                                     <input type="text" name="protocolo_cartorio" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['protocolo_cartorio'] ?? '') ?>">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="small fw-bold text-muted mb-1">Link de Acesso (URL)</label>
+                                    <input type="url" name="link_acesso" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['link_acesso'] ?? '') ?>" placeholder="https://...">
                                 </div>
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Comunicação Interna (CI)</label>
@@ -725,15 +698,15 @@ function formatBytes($bytes, $precision = 2) {
                                 </div>
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">CCI</label>
-                                    <input type="text" name="cci" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['cci']) ?>">
+                                    <input type="text" name="cci" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['cci'] ?? '') ?>">
                                 </div>
                                 <div class="mb-2">
                                     <label class="small fw-bold text-muted mb-1">Interessado</label>
-                                    <input type="text" name="nome_interessado" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['nome_interessado']) ?>">
+                                    <input type="text" name="nome_interessado" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['nome_interessado'] ?? '') ?>">
                                 </div>
                                 <div class="mb-3">
                                     <label class="small fw-bold text-muted mb-1">Endereço</label>
-                                    <input type="text" name="endereco" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['endereco']) ?>">
+                                    <input type="text" name="endereco" class="form-control form-control-sm rounded-3" value="<?= htmlspecialchars($tarefa['endereco'] ?? '') ?>">
                                 </div>
 
                                 <div class="d-flex justify-content-end gap-2">
@@ -758,10 +731,20 @@ function formatBytes($bytes, $precision = 2) {
                                 <form method="POST" onsubmit="return confirm('Tem certeza que deseja reabrir esta tarefa? Ela voltará para a lista de pendentes.')">
                                     <input type="hidden" name="acao" value="reabrir">
                                     <button class="btn btn-warning text-dark w-100 py-2 rounded-3 fw-bold shadow-sm">
-                                        <i class="fa-solid fa-folder-open me-2"></i> Reabrir Tarefa
+                                        <i class="fa-solid fa-rotate-left me-2"></i> Reabrir Tarefa
                                     </button>
                                 </form>
                             <?php endif; ?>
+                            
+                            <form method="POST">
+                                <?php if($tarefa['status'] == 'arquivado'): ?>
+                                    <input type="hidden" name="acao" value="desarquivar">
+                                    <button class="btn btn-outline-secondary w-100 rounded-3" type="submit"><i class="fa-solid fa-box-open me-2"></i> Desarquivar</button>
+                                <?php else: ?>
+                                    <input type="hidden" name="acao" value="arquivar">
+                                    <button class="btn btn-outline-secondary w-100 rounded-3" type="submit" onclick="return confirm('Arquivar esta tarefa? Atenção: Todos os anexos serão excluídos permanentemente.')"><i class="fa-solid fa-box-archive me-2"></i> Arquivar</button>
+                                <?php endif; ?>
+                            </form>
                             
                             <?php if ($nivel_logado <= 6): ?>
                             <div class="accordion" id="accTransfer">
@@ -869,12 +852,12 @@ function formatBytes($bytes, $precision = 2) {
                         
                         <div class="mb-3">
                             <label class="small fw-bold text-muted">Título da Tarefa</label>
-                            <input type="text" name="titulo" class="form-control rounded-3" value="<?= htmlspecialchars($tarefa['titulo']) ?>" required>
+                            <input type="text" name="titulo" class="form-control rounded-3" value="<?= htmlspecialchars($tarefa['titulo'] ?? '') ?>" required>
                         </div>
                         
                         <div class="mb-3">
                             <label class="small fw-bold text-muted">Descrição / Detalhes</label>
-                            <textarea name="descricao" class="form-control rounded-3" rows="4"><?= htmlspecialchars($tarefa['descricao']) ?></textarea>
+                            <textarea name="descricao" class="form-control rounded-3" rows="4"><?= htmlspecialchars($tarefa['descricao'] ?? '') ?></textarea>
                         </div>
 
                         <div class="row g-3 mb-3">
@@ -883,17 +866,17 @@ function formatBytes($bytes, $precision = 2) {
                                 <select name="categoria_id" class="form-select rounded-3">
                                     <option value="">Sem categoria</option>
                                     <?php foreach($todasCategorias as $cat): ?>
-                                        <option value="<?= $cat['id'] ?>" <?= $tarefa['categoria_id'] == $cat['id'] ? 'selected' : '' ?>><?= htmlspecialchars($cat['nome']) ?></option>
+                                        <option value="<?= $cat['id'] ?>" <?= ($tarefa['categoria_id'] ?? '') == $cat['id'] ? 'selected' : '' ?>><?= htmlspecialchars($cat['nome']) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
                             <div class="col-md-6">
                                 <label class="small fw-bold text-muted">Prioridade</label>
                                 <select name="prioridade" class="form-select rounded-3">
-                                    <option value="baixa" <?= $tarefa['prioridade'] == 'baixa' ? 'selected' : '' ?>>Baixa</option>
-                                    <option value="media" <?= $tarefa['prioridade'] == 'media' ? 'selected' : '' ?>>Média</option>
-                                    <option value="alta" <?= $tarefa['prioridade'] == 'alta' ? 'selected' : '' ?>>Alta</option>
-                                    <option value="urgente" <?= $tarefa['prioridade'] == 'urgente' ? 'selected' : '' ?>>Urgente</option>
+                                    <option value="baixa" <?= ($tarefa['prioridade'] ?? '') == 'baixa' ? 'selected' : '' ?>>Baixa</option>
+                                    <option value="media" <?= ($tarefa['prioridade'] ?? 'media') == 'media' ? 'selected' : '' ?>>Média</option>
+                                    <option value="alta" <?= ($tarefa['prioridade'] ?? '') == 'alta' ? 'selected' : '' ?>>Alta</option>
+                                    <option value="urgente" <?= ($tarefa['prioridade'] ?? '') == 'urgente' ? 'selected' : '' ?>>Urgente</option>
                                 </select>
                             </div>
                         </div>
@@ -902,11 +885,19 @@ function formatBytes($bytes, $precision = 2) {
                         <div class="row g-3">
                             <div class="col-md-4">
                                 <label class="small text-muted">Nº Prodata</label>
-                                <input type="text" name="numero_prodata" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['numero_prodata']) ?>">
+                                <input type="text" name="numero_prodata" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['numero_prodata'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small text-muted">Processo Externo</label>
+                                <input type="text" name="processo_externo" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['processo_externo'] ?? '') ?>">
                             </div>
                             <div class="col-md-4">
                                 <label class="small text-muted">Protocolo Cartório</label>
                                 <input type="text" name="protocolo_cartorio" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['protocolo_cartorio'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small text-muted">Link de Acesso</label>
+                                <input type="url" name="link_acesso" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['link_acesso'] ?? '') ?>" placeholder="https://...">
                             </div>
                             <div class="col-md-4">
                                 <label class="small text-muted">CI (Comunicação Interna)</label>
@@ -914,15 +905,15 @@ function formatBytes($bytes, $precision = 2) {
                             </div>
                             <div class="col-md-4">
                                 <label class="small text-muted">CCI</label>
-                                <input type="text" name="cci" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['cci']) ?>">
+                                <input type="text" name="cci" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['cci'] ?? '') ?>">
                             </div>
-                            <div class="col-md-8">
+                            <div class="col-md-6">
                                 <label class="small text-muted">Interessado</label>
-                                <input type="text" name="nome_interessado" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['nome_interessado']) ?>">
+                                <input type="text" name="nome_interessado" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['nome_interessado'] ?? '') ?>">
                             </div>
-                            <div class="col-12">
+                            <div class="col-md-6">
                                 <label class="small text-muted">Endereço</label>
-                                <input type="text" name="endereco" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['endereco']) ?>">
+                                <input type="text" name="endereco" class="form-control form-control-sm" value="<?= htmlspecialchars($tarefa['endereco'] ?? '') ?>">
                             </div>
                         </div>
 
@@ -932,29 +923,6 @@ function formatBytes($bytes, $precision = 2) {
             </div>
         </div>
     </div>
-
-    <footer class="footer-custom">
-        <div class="container">
-            <div class="row align-items-center text-center text-md-start">
-                
-                <div class="col-md-6 mb-3 mb-md-0">
-                    <div class="footer-dev-label">Sistemas desenvolvidos e cedidos por</div>
-                    <a href="https://www.mhos.com.br" target="_blank" class="footer-dev-name d-block">Mário Henrique Inácio de Paula</a>
-                    <div style="font-size: 0.75rem; color: #adb5bd; font-weight: normal; margin-top: 3px;">Versão 10.3</div>
-                </div>
-
-                <div class="col-md-6 text-center text-md-end mb-3 mb-md-0">
-                    <a href="https://wa.me/5564992238703" target="_blank" class="footer-social-btn footer-whatsapp" title="WhatsApp">
-                        <i class="fa-brands fa-whatsapp"></i>
-                    </a>
-                    <a href="https://instagram.com/mariomorrinhos" target="_blank" class="footer-social-btn footer-instagram" title="Instagram">
-                        <i class="fa-brands fa-instagram"></i>
-                    </a>
-                </div>
-
-            </div>
-        </div>
-    </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -1004,7 +972,6 @@ function formatBytes($bytes, $precision = 2) {
             myModal.show();
         }
 
-        // Função para alternar a edição inline dos Dados do Processo
         function toggleEditProcesso() {
             const view = document.getElementById('view_processo');
             const edit = document.getElementById('edit_processo');
