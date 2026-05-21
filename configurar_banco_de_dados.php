@@ -1,3 +1,4 @@
+// setup_db.php
 <?php
 // ATIVAR EXIBIÇÃO DE ERROS
 ini_set('display_errors', 1);
@@ -35,7 +36,7 @@ try {
             cor VARCHAR(7) DEFAULT '#6c757d'
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
 
-        // 3. TABELA TAREFAS
+        // 3. TABELA TAREFAS (Atualizada com as novas colunas)
         "CREATE TABLE IF NOT EXISTS tarefas (
             id INT AUTO_INCREMENT PRIMARY KEY,
             protocolo VARCHAR(20) NULL,
@@ -48,6 +49,9 @@ try {
             criado_por INT NOT NULL,
             categoria_id INT NULL,
             numero_prodata VARCHAR(50) NULL,
+            processo_externo VARCHAR(50) NULL,
+            protocolo_cartorio VARCHAR(50) NULL,
+            link_acesso VARCHAR(255) NULL,
             ci VARCHAR(50) NULL,
             cci VARCHAR(50) NULL,
             nome_interessado VARCHAR(255) NULL,
@@ -130,7 +134,32 @@ try {
     foreach ($queries as $sql) {
         $pdo->exec($sql);
     }
-    echo "<span style='color: green;'>✔ Todas as tabelas foram criadas com sucesso.</span><br><br>";
+    echo "<span style='color: green;'>✔ Todas as tabelas foram verificadas com sucesso.</span><br><br>";
+
+    // =========================================================================
+    // ATUALIZAÇÃO DA ESTRUTURA (Evita erros se as tabelas já existirem)
+    // =========================================================================
+    echo "Verificando e aplicando atualizações de estrutura na tabela tarefas...<br>";
+
+    // Adiciona processo_externo
+    try {
+        $pdo->exec("ALTER TABLE tarefas ADD COLUMN processo_externo VARCHAR(50) DEFAULT NULL AFTER numero_prodata");
+        echo "<span style='color: blue;'>+ Coluna 'processo_externo' adicionada com sucesso.</span><br>";
+    } catch (PDOException $e) { /* Ignora se já existir */ }
+
+    // Adiciona protocolo_cartorio
+    try {
+        $pdo->exec("ALTER TABLE tarefas ADD COLUMN protocolo_cartorio VARCHAR(50) DEFAULT NULL AFTER processo_externo");
+        echo "<span style='color: blue;'>+ Coluna 'protocolo_cartorio' adicionada com sucesso.</span><br>";
+    } catch (PDOException $e) { /* Ignora se já existir */ }
+
+    // Adiciona link_acesso
+    try {
+        $pdo->exec("ALTER TABLE tarefas ADD COLUMN link_acesso VARCHAR(255) DEFAULT NULL AFTER protocolo_cartorio");
+        echo "<span style='color: blue;'>+ Coluna 'link_acesso' adicionada com sucesso.</span><br>";
+    } catch (PDOException $e) { /* Ignora se já existir */ }
+
+    echo "<br>";
 
     // =========================================================================
     // INSERÇÕES PADRÃO (SETUP INICIAL)
@@ -173,7 +202,7 @@ try {
     }
 
     $pdo->commit();
-    echo "<h3><span style='color: green;'>Banco de Dados configurado e pronto para uso! 🚀</span></h3>";
+    echo "<h3><span style='color: green;'>Banco de Dados configurado e atualizado! 🚀</span></h3>";
     echo "<p><a href='index.php' style='padding: 10px 20px; background: #004d26; color: white; text-decoration: none; border-radius: 5px;'>Ir para a Tela de Login</a></p>";
     echo "<p style='color: red; font-size: 12px;'>Aviso: Após confirmar que o sistema está funcionando, apague este arquivo (setup_db.php) por segurança.</p>";
 
