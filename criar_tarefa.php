@@ -12,7 +12,7 @@ if (!isset($_SESSION['usuario_id'])) {
 $msg = "";
 $erro = "";
 
-// Buscar usuários da equipe (Para tarefas e eventos terceirizados)
+// Buscar usuários da equipe (Para tarefas)
 $usuarios_equipe = [];
 if ($_SESSION['usuario_nivel'] <= 4) {
     $stmt = $pdo->query("SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome ASC");
@@ -39,7 +39,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (empty($titulo) || empty($data_hora)) {
         $erro = "Preencha o título e a data obrigatória.";
     } elseif ($tipo_cadastro == 'tarefa' && empty($_POST['categoria_id'])) {
-        // Validação back-end da categoria obrigatória
         $erro = "A categoria é obrigatória para o cadastro de tarefas.";
     } else {
         
@@ -56,7 +55,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if ($_SESSION['usuario_nivel'] <= 4 && isset($_POST['participantes_evento'])) {
                 $participantes = $_POST['participantes_evento'];
             } else {
-                // Se não for nível superior ou vier vazio, é apenas para ele mesmo
                 $participantes = [$_SESSION['usuario_id']];
             }
 
@@ -70,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $stmt = $pdo->prepare("INSERT INTO eventos (usuario_id, titulo, inicio, termino, numero_tarefa, descricao, status) VALUES (?, ?, ?, ?, ?, ?, 'pendente')");
                         $stmt->execute([$uid_evento, $titulo, $data_hora, $termino, $numero_tarefa, $descricao]);
                         
-                        // LÓGICA DE NOTIFICAÇÃO (Caso o evento seja para um terceiro)
+                        // LÓGICA DE NOTIFICAÇÃO
                         if ($uid_evento != $_SESSION['usuario_id']) {
                             $nome_criador = explode(' ', $_SESSION['usuario_nome'])[0];
                             $data_formatada = date('d/m/Y \à\s H:i', strtotime($data_hora));
@@ -97,6 +95,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $prioridade = $_POST['prioridade'];
             $categoria_id = intval($_POST['categoria_id']);
             $numero_prodata = !empty($_POST['numero_prodata']) ? trim($_POST['numero_prodata']) : null;
+            $processo_externo = !empty($_POST['processo_externo']) ? trim($_POST['processo_externo']) : null; // NOVO CAMPO
+            $protocolo_cartorio = !empty($_POST['protocolo_cartorio']) ? trim($_POST['protocolo_cartorio']) : null;
+            $link_acesso = !empty($_POST['link_acesso']) ? trim($_POST['link_acesso']) : null; 
             $nome_interessado = !empty($_POST['nome_interessado']) ? trim($_POST['nome_interessado']) : null;
             $endereco = !empty($_POST['endereco']) ? trim($_POST['endereco']) : null;
             $cci = !empty($_POST['cci']) ? trim($_POST['cci']) : null;
@@ -119,13 +120,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $sequencia = $ultimoProtocolo ? intval(substr($ultimoProtocolo, 4)) + 1 : 1;
                 $novoProtocolo = $anoAtual . str_pad($sequencia, 4, '0', STR_PAD_LEFT);
 
-                // Insert Tarefa
-                $sql = "INSERT INTO tarefas (protocolo, titulo, descricao, prazo, prioridade, usuario_id, criado_por, categoria_id, numero_prodata, nome_interessado, endereco, cci) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                // Insert Tarefa (Agora com processo_externo)
+                $sql = "INSERT INTO tarefas (protocolo, titulo, descricao, prazo, prioridade, usuario_id, criado_por, categoria_id, numero_prodata, processo_externo, protocolo_cartorio, link_acesso, nome_interessado, endereco, cci) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
                     $novoProtocolo, $titulo, $descricao, $data_hora, $prioridade, $responsavel_id, $_SESSION['usuario_id'],
-                    $categoria_id, $numero_prodata, $nome_interessado, $endereco, $cci
+                    $categoria_id, $numero_prodata, $processo_externo, $protocolo_cartorio, $link_acesso, $nome_interessado, $endereco, $cci
                 ]);
                 
                 $id_tarefa_criada = $pdo->lastInsertId();
@@ -199,7 +200,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             border: 1px solid rgba(0,0,0,0.02); position: relative; overflow: hidden;
         }
         
-        /* Indicador de Tipo no Topo do Card */
         .form-card::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px;
             background: linear-gradient(90deg, #2193b0, #6dd5ed); 
@@ -220,10 +220,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
         .btn-criar:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(33, 147, 176, 0.3); color: white; }
         
-        /* Estilo Botão Evento */
-        .btn-criar.btn-evento-mode {
-            background: linear-gradient(90deg, #8b5cf6, #d946ef);
-        }
+        .btn-criar.btn-evento-mode { background: linear-gradient(90deg, #8b5cf6, #d946ef); }
         .btn-criar.btn-evento-mode:hover { box-shadow: 0 5px 15px rgba(139, 92, 246, 0.3); }
 
         .btn-voltar { color: #64748b; text-decoration: none; font-weight: 600; }
@@ -231,7 +228,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         .section-title { font-size: 0.8rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; margin-bottom: 1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 5px; margin-top: 1.5rem; }
 
-        /* Switcher Toggle */
         .type-switcher {
             background: #f1f5f9; border-radius: 50px; padding: 4px; display: flex;
             margin-bottom: 2rem; border: 1px solid #e2e8f0; width: 100%;
@@ -246,14 +242,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .type-option.active[data-type="tarefa"] { color: #0284c7; }
         .type-option.active[data-type="evento"] { color: #8b5cf6; }
 
-        /* Estilos Participantes (Chips) */
         .participant-chip {
             background-color: #ede9fe; color: #6d28d9; padding: 5px 12px; border-radius: 50px;
             font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #ddd6fe;
         }
-        .participant-chip .remove-chip {
-            cursor: pointer; color: #8b5cf6; border-radius: 50%; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; transition: all 0.2s;
-        }
+        .participant-chip .remove-chip { cursor: pointer; color: #8b5cf6; border-radius: 50%; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; transition: all 0.2s; }
         .participant-chip .remove-chip:hover { background-color: #8b5cf6; color: white; }
 
         .user-suggestions-box {
@@ -271,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <nav class="navbar navbar-glass fixed-top">
         <div class="container">
             <a class="navbar-brand" href="dashboard.php">
-                <i class="fa-solid fa-layer-group me-2"></i>HabitaNet Tarefas
+                <i class="fa-solid fa-layer-group me-2"></i>ATLAS TAREFAS
             </a>
             <a href="dashboard.php" class="btn btn-sm btn-outline-secondary rounded-pill">
                 <i class="fa-solid fa-times"></i> Fechar
@@ -304,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 <?php endif; ?>
 
                 <div class="form-card" id="mainCard">
-                    <form method="POST" enctype="multipart/form-data" autocomplete="off">
+                    <form method="POST" enctype="multipart/form-data">
                         
                         <div class="type-switcher">
                             <div class="type-option active" id="optTarefa" data-type="tarefa" onclick="setTipo('tarefa')">
@@ -328,47 +321,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 <input type="datetime-local" name="prazo" id="prazo" class="form-control" required>
                             </div>
 
-                            <div id="campos-tarefa" class="col-md-6 m-0 p-0" style="padding-left: calc(var(--bs-gutter-x) * .5) !important;">
-                                <label for="categoria_id">Categoria <span class="text-danger">*</span></label>
-                                <select name="categoria_id" id="categoria_id" class="form-select" required>
-                                    <option value="" disabled selected>Selecione uma categoria...</option>
-                                    <?php foreach($categorias as $cat): ?>
-                                        <option value="<?= $cat['id'] ?>"><?= htmlspecialchars($cat['nome']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <div id="campos-evento" class="col-12 m-0 p-0 mt-3" style="display: none;">
-                                <div class="p-3 bg-light rounded-4 border">
-                                    
-                                    <?php if($_SESSION['usuario_nivel'] <= 4): ?>
-                                    <h6 class="fw-bold mb-3" style="color: #8b5cf6;"><i class="fa-solid fa-users me-2"></i>Participantes</h6>
-                                    
-                                    <div id="participantes_container" class="mb-3 d-flex flex-wrap gap-2">
-                                        </div>
-                                    
-                                    <div class="position-relative mb-4">
-                                        <input type="text" id="busca_usuario_evento" class="form-control form-control-sm rounded-pill" placeholder="Digite para adicionar participantes (3 letras)...">
-                                        <div id="sugestoes_usuarios_evento" class="user-suggestions-box"></div>
-                                    </div>
-                                    
-                                    <div id="inputs_hidden_participantes"></div>
-                                    <?php endif; ?>
-
-                                    <div class="row g-3 border-top pt-2">
-                                        <div class="col-md-6">
-                                            <label class="small fw-bold text-muted">Término (Opcional)</label>
-                                            <input type="datetime-local" name="termino_evento" class="form-control form-control-sm rounded-3">
-                                        </div>
-                                        <div class="col-md-6">
-                                            <label class="small fw-bold text-muted">Nº da Tarefa Relacionada (Opc. )</label>
-                                            <input type="text" name="numero_tarefa_evento" class="form-control form-control-sm rounded-3" placeholder="Ex: 20260001">
-                                        </div>
-                                    </div>
+                            <div id="campos-tarefa" class="col-md-6 row g-3 m-0 p-0">
+                                <div class="col-12">
+                                    <label for="categoria_id">Categoria</label>
+                                    <select name="categoria_id" id="categoria_id" class="form-select">
+                                        <option value="">Sem categoria</option>
+                                        <?php foreach($categorias as $cat): ?>
+                                            <option value="<?= $cat['id'] ?>"><?= htmlspecialchars($cat['nome']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </div>
                             </div>
-
-                            <div class="col-12 mt-3">
+                            <div class="col-12">
                                 <label for="descricao">Detalhes / Descrição</label>
                                 <textarea name="descricao" id="descricao" class="form-control" rows="4" placeholder="Descreva os detalhes..."></textarea>
                             </div>
@@ -376,9 +340,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <div id="campos-complementares-tarefa" class="w-100">
                                 <div class="col-12"><div class="section-title">Dados do Processo (Opcional)</div></div>
                                 <div class="row g-3">
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label for="numero_prodata">Nº Prodata</label>
                                         <input type="text" name="numero_prodata" id="numero_prodata" class="form-control" placeholder="0000/0000">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="processo_externo">Processo Externo</label>
+                                        <input type="text" name="processo_externo" id="processo_externo" class="form-control" placeholder="Nº Processo">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="protocolo_cartorio">Protocolo Cartório</label>
+                                        <input type="text" name="protocolo_cartorio" id="protocolo_cartorio" class="form-control" placeholder="Nº Protocolo">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="link_acesso">Link de Acesso (URL)</label>
+                                        <input type="url" name="link_acesso" id="link_acesso" class="form-control" placeholder="https://...">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="ci">CI (Opcional)</label>
+                                        <input type="text" name="ci" id="ci" class="form-control" placeholder="Nº CI">
                                     </div>
                                     <div class="col-md-4">
                                         <label for="cci">CCI</label>
@@ -393,6 +373,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                             <option value="urgente">Urgente</option>
                                         </select>
                                     </div>
+                                    
                                     <div class="col-12">
                                         <label for="nome_interessado">Nome do Interessado</label>
                                         <input type="text" name="nome_interessado" id="nome_interessado" class="form-control" placeholder="Nome completo">
@@ -410,14 +391,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                         <input type="file" name="anexos[]" id="anexos" class="form-control" accept="application/pdf, image/jpeg, image/png" multiple>
                                         <div class="form-text text-muted"><i class="fa-solid fa-circle-info me-1"></i> Aceita <strong>PDF, JPG e PNG</strong>. Máx <strong>4MB</strong>.</div>
                                     </div>
-                                    <div class="col-12">
+                                    <div class="col-12 mb-2">
                                         <label for="responsavel_id">Responsável pela execução</label>
                                         <?php if($_SESSION['usuario_nivel'] <= 4): ?>
                                             <select name="responsavel_id" id="responsavel_id" class="form-select border-primary">
                                                 <option value="<?= $_SESSION['usuario_id'] ?>">Eu mesmo (<?= $_SESSION['usuario_nome'] ?>)</option>
                                                 <?php foreach($usuarios_equipe as $u): ?>
                                                     <?php if($u['id'] != $_SESSION['usuario_id']): ?>
-                                                        <option value="<?= $u['id'] ?>"><?= htmlspecialchars($u['nome']) ?></option>
+                                                        <option value="<?= $u['id'] ?>"><?= $u['nome'] ?></option>
                                                     <?php endif; ?>
                                                 <?php endforeach; ?>
                                             </select>
@@ -444,7 +425,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Transição entre Tarefa e Evento
         function setTipo(tipo) {
             document.getElementById('tipo_cadastro').value = tipo;
 
@@ -452,28 +432,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             document.getElementById('optEvento').classList.remove('active');
             
             const camposTarefa = document.getElementById('campos-tarefa');
-            const camposEvento = document.getElementById('campos-evento');
             const camposComp = document.getElementById('campos-complementares-tarefa');
             const mainCard = document.getElementById('mainCard');
             const btnSubmit = document.getElementById('btnSubmit');
             const lblTitulo = document.getElementById('lblTitulo');
             const lblPrazo = document.getElementById('lblPrazo');
             const pageTitle = document.getElementById('page-title');
-            
-            // Obter a referência do select de categoria
-            const categoriaSelect = document.getElementById('categoria_id');
 
             if (tipo === 'evento') {
                 document.getElementById('optEvento').classList.add('active');
                 
-                if (camposTarefa) {
-                    camposTarefa.style.display = 'none';
-                    // Remove o required da categoria ao ir para Evento para não travar o form
-                    if (categoriaSelect) categoriaSelect.required = false; 
-                }
-                
-                if (camposComp) camposComp.style.display = 'none';
-                if (camposEvento) camposEvento.style.display = 'block';
+                camposTarefa.style.display = 'none';
+                camposComp.style.display = 'none';
 
                 mainCard.classList.add('mode-evento');
                 btnSubmit.classList.add('btn-evento-mode');
@@ -486,15 +456,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } else {
                 document.getElementById('optTarefa').classList.add('active');
                 
-                if (camposEvento) camposEvento.style.display = 'none';
-                
-                if (camposTarefa) {
-                    camposTarefa.style.display = 'block';
-                    // Devolve o required para a categoria ao voltar para Tarefa
-                    if (categoriaSelect) categoriaSelect.required = true; 
-                }
-                
-                if (camposComp) camposComp.style.display = 'block';
+                camposTarefa.style.display = 'flex'; 
+                camposComp.style.display = 'block';
 
                 mainCard.classList.remove('mode-evento');
                 btnSubmit.classList.remove('btn-evento-mode');
@@ -506,7 +469,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
 
-        // LÓGICA DE MULTI-PARTICIPANTES (Apenas Nível <= 4)
         <?php if($_SESSION['usuario_nivel'] <= 4): ?>
         
         const usuariosEquipe = <?= json_encode($usuarios_equipe) ?>;
@@ -524,7 +486,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             containerInputs.innerHTML = '';
 
             participantes.forEach((p, index) => {
-                // Renderiza o Chip (Visual)
                 const chip = document.createElement('div');
                 chip.className = 'participant-chip';
                 chip.innerHTML = `
@@ -533,7 +494,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 `;
                 containerChips.appendChild(chip);
 
-                // Renderiza o Input Hidden (Pro PHP)
                 const hidden = document.createElement('input');
                 hidden.type = 'hidden';
                 hidden.name = 'participantes_evento[]';
@@ -561,14 +521,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if (matches.length > 0) {
                 listaSugestoes.style.display = 'block';
                 matches.forEach(u => {
-                    // Ignora se já estiver na lista
                     const jaEstaNaLista = participantes.find(p => p.id == u.id);
                     if(!jaEstaNaLista) {
                         const div = document.createElement('div');
                         div.className = 'suggestion-item-event';
                         div.innerHTML = `<i class="fa-solid fa-user me-2 text-muted"></i>${u.nome}`;
                         div.onclick = () => {
-                            participantes.push({ id: u.id, nome: u.nome.split(' ')[0] }); // Adiciona só o primeiro nome pro chip não ficar gigante
+                            participantes.push({ id: u.id, nome: u.nome.split(' ')[0] }); 
                             renderizarParticipantes();
                             inputBusca.value = '';
                             listaSugestoes.style.display = 'none';
@@ -577,10 +536,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         listaSugestoes.appendChild(div);
                     }
                 });
-                
-                // Se nenhum match sobrou (todos os encontrados já estão na lista)
                 if(listaSugestoes.innerHTML === '') listaSugestoes.style.display = 'none';
-
             } else {
                 listaSugestoes.style.display = 'none';
             }
@@ -592,10 +548,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         });
 
-        // Chamada inicial
         renderizarParticipantes();
         <?php endif; ?>
-
     </script>
     <?php include 'chat_widget.php'; ?>
 </body>
